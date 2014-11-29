@@ -1,0 +1,268 @@
+<!doctype html>
+<html>
+    <head>
+        <title>CITS3003 Project</title>
+        <style>
+            body, html { 
+                padding: 0px;
+                margin: 0px;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background-color: black; 
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                background-color: white; 
+            }
+        </style>
+        <script id="vertexShader" type="x-shader/x-vertex">
+            attribute vec3 vertexPosition;
+
+            void main()
+            {
+                gl_Position = vec4(vertexPosition, 1.0);
+            }
+        </script>
+        <script id="fragmentShader" type="x-shader/x-fragment">
+            #ifdef GL_FRAGMENT_PRECISION_HIGH
+                precision highp float;
+            #else
+                precision mediump float;
+            #endif
+
+            uniform vec2 c;
+            uniform vec2 scale;
+            uniform float time;
+
+            void main()
+            {
+                float R = gl_FragCoord.x * 2.5 / scale.x - 1.25;
+                float I = (gl_FragCoord.y * 2.5 / scale.y - 1.25) * scale.y / scale.x;
+
+                float rSquared = R*R;
+                float iSquared = I*I;
+
+                int lastIteration;
+
+                for (int i = 0; i < 255; i++)
+                {
+                    I = (R + R) * I + c.y;
+                    R = rSquared - iSquared + c.x;
+                    rSquared = R*R;
+                    iSquared = I*I;
+                    lastIteration = i;
+
+                    if (abs(iSquared / (I + R)) > 10.0) break;
+                }
+
+                if (lastIteration == 254) 
+                {
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                }
+                else
+                {
+                    float a = float(lastIteration);
+                    a = mod(a+time, 45.0) / 15.0;
+
+                    gl_FragColor = vec4(
+                        max(0.0, abs(a - 1.5) - 0.5),
+                        max(0.0, 1.0 - abs(a - 1.0)),
+                        max(0.0, 1.0 - abs(a - 2.0)),
+                        1.0
+                    );
+                }
+            }
+        </script>
+        <script>
+            "use strict";
+            var gl = null;
+            var canvas = null;
+            var glProgram = null;
+            var fragmentShader = null; 
+            var vertexShader = null;
+            var vao = null;
+            var date = new Date();
+            
+            var lastMouseX = 0;
+            var lastMouseY = 0;
+
+            var uniformCPointer = null;
+            var uniformScalePointer = null;
+            var uniformTimePointer = null;
+            var vertexPositionPointer = null;
+
+            var vertexArrayObjectExtension = null;
+
+            function setupWebGL()
+            {
+            	if (!window.WebGLRenderingContext)
+            	{
+            	    //No webgl :(
+            	    alert("Your browser doesn't support WebGL, what is this, the 90's?");
+            	    window.location = "http://get.webgl.org";
+            	}
+
+                canvas = document.getElementById("My Canvas");
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+        		
+            	try
+            	{
+            	    gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+            	}
+            	catch(e) {}
+
+            	if (!gl)
+            	{
+            	    alert("Unable to establish WebGL context, uh oh.");
+            	    window.location = "http://get.webgl.org/troubleshooting";
+            	}
+
+                try
+                {
+                    vertexArrayObjectExtension =  gl.getExtension("OES_vertex_array_object");
+                }
+                catch(e) {}
+
+                if (!vertexArrayObjectExtension)
+                {
+                    alert("Unable to load WebGL extension OES_vertex_array_object\nTry updating Chrome/Firefox/Safari/Stone Tablet.");
+                    window.location = "http://webglreport.com/";
+                }
+
+            	initWebGL();
+            	initShaders();
+            	setupBuffers();
+            	window.requestAnimationFrame(drawScene);
+            }
+
+            function initWebGL()
+            {
+            	gl.clearColor(0.0, 0.0, 0.0, 1.0);
+    	        gl.frontFace(gl.CW);
+                gl.enable(gl.CULL_FACE);
+    	        gl.depthFunc(gl.LEQUAL);
+    	        gl.clear(gl.COLOR_BUFFER_BIT);
+
+                window.onresize = function(event) {
+                    var width = canvas.clientWidth;
+                    var height = canvas.clientHeight;
+                    gl.viewport(0, 0, width, height);
+                    gl.canvas.height = height;
+                    gl.canvas.width = width;
+                    gl.uniform2f(uniformScalePointer, canvas.clientWidth, canvas.clientHeight);
+                }
+
+                canvas.onmousedown = handleMouseMove;
+                document.onmousemove = handleMouseMove;
+            }
+
+            function handleMouseMove(event)
+            {
+        	   lastMouseX = event.clientX;
+               lastMouseY = event.clientY;
+            }
+
+            function initShaders()
+            {
+            	//Get the shaders
+            	vertexShader   = readyShader("vertexShader", gl.VERTEX_SHADER);
+            	fragmentShader = readyShader("fragmentShader", gl.FRAGMENT_SHADER);
+
+        		//Create the program
+        		glProgram = gl.createProgram();
+
+        		//Attach the shaders
+        		gl.attachShader(glProgram, fragmentShader);
+        		gl.attachShader(glProgram, vertexShader);
+        		gl.linkProgram(glProgram);
+
+        		if (!gl.getProgramParameter(glProgram, gl.LINK_STATUS))
+        		{
+        			alert("Unable to initialize shader program");
+        		}
+
+        		gl.useProgram(glProgram);
+
+                uniformCPointer = gl.getUniformLocation(glProgram, "c");
+                uniformScalePointer = gl.getUniformLocation(glProgram, "scale");
+                uniformTimePointer = gl.getUniformLocation(glProgram, "time");
+
+                vertexPositionPointer = gl.getAttribLocation(glProgram, "vertexPosition");
+        	}
+
+        	function readyShader(elementId, type)
+        	{
+        		var shader = gl.createShader(type);
+        		
+        		//Retrieve the shader source from the DOM
+        		gl.shaderSource(shader, document.getElementById(elementId).innerHTML);
+        		gl.compileShader(shader);
+
+        		if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+        		{
+        			alert("Error compiling shader" + gl.getShaderInfoLog(shader));
+        		}
+        		return shader;
+        	}
+
+        	function setupBuffers()
+        	{
+                vao = vertexArrayObjectExtension.createVertexArrayOES();
+                vertexArrayObjectExtension.bindVertexArrayOES(vao);
+
+                var vertexPositionBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, vertexPositionBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, 
+                    new Float32Array([
+                        -1.0, -1.0, 0.0,
+                         1.0, -1.0, 0.0,
+                         1.0,  1.0, 0.0,
+                        -1.0,  1.0, 0.0
+                    ]), 
+                    gl.STATIC_DRAW
+                );
+                gl.enableVertexAttribArray(vertexPositionPointer);
+                gl.vertexAttribPointer(vertexPositionPointer, 3, gl.FLOAT, gl.FALSE, 0, 0);
+
+                var vertexIndexBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, vertexIndexBuffer);
+                gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, 
+                    new Uint16Array([
+                        0, 3, 1,
+                        1, 3, 2
+                    ]),
+                    gl.STATIC_DRAW
+                );
+
+                vertexArrayObjectExtension.bindVertexArrayOES(null);
+                gl.uniform2f(uniformScalePointer, canvas.clientWidth, canvas.clientHeight);
+        	}
+
+        	function drawScene(timeStamp)
+        	{
+                drawScene.startTime = drawScene.startTime || timeStamp;
+                var delT = drawScene.startTime - timeStamp
+
+                gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+                
+                gl.uniform2f(uniformCPointer, lastMouseX * 3.0/ canvas.clientWidth - 2.0, lastMouseY * 2.0/ canvas.clientHeight - 1.0);
+                gl.uniform1f(uniformTimePointer, delT / 500.0);
+                vertexArrayObjectExtension.bindVertexArrayOES(vao);  
+                gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0); 
+                vertexArrayObjectExtension.bindVertexArrayOES(null);
+                
+                window.requestAnimationFrame(drawScene);
+        	}
+        </script>
+    </head>
+    <body onload="setupWebGL()">
+        <div>
+            <canvas id="My Canvas">
+                Your browser is ancient, no canvas element for you. :'(
+            </canvas>
+        </div>
+    </body>
+</html>
